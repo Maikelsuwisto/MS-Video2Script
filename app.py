@@ -141,7 +141,11 @@ def health():
 # -----------------------
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))  # use Railway's dynamic port
-    print("Starting Uvicorn on port:", port)
+    import os
+
+    # Railway sets the PORT environment variable
+    port = int(os.environ["PORT"])  # do not fallback
+    print(f"Starting Uvicorn on Railway port {port}")
+
     uvicorn.run("app:app", host="0.0.0.0", port=port)
 
