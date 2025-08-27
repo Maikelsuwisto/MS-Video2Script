@@ -6,7 +6,6 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-import uvicorn
 
 # -----------------------
 # FastAPI app
@@ -28,7 +27,6 @@ build_path = "build"  # React build folder in same folder as app.py
 if not os.path.exists(build_path):
     raise RuntimeError(f"React build folder not found at '{build_path}'")
 
-# Mount static files
 app.mount("/", StaticFiles(directory=build_path, html=True), name="frontend")
 
 # -----------------------
@@ -128,11 +126,3 @@ async def debug_exception_handler(request: Request, exc: Exception):
             "traceback": traceback.format_exc()
         },
     )
-
-# -----------------------
-# Run with Railway's PORT
-# -----------------------
-if __name__ == "__main__":
-    port = int(os.environ["PORT"])
-    print(f"Starting Uvicorn on Railway port {port}")
-    uvicorn.run("app:app", host="0.0.0.0", port=port)
