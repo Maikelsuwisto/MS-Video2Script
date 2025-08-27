@@ -30,7 +30,12 @@ build_path = "build"  # React build folder in same folder as app.py
 if not os.path.exists(build_path):
     raise RuntimeError(f"React build folder not found at '{build_path}'")
 
-app.mount("/", StaticFiles(directory=build_path, html=True), name="frontend")
+app.mount("/assets", StaticFiles(directory=os.path.join(build_path, "assets")), name="assets")
+
+# Catch-all route for SPA
+@app.get("/{full_path:path}")
+async def spa_fallback(full_path: str):
+    return FileResponse(os.path.join(build_path, "index.html"))
 
 # -----------------------
 # Health checks
