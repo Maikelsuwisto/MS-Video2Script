@@ -129,6 +129,7 @@ async def transcribe(
     finally:
         if os.path.exists(save_path):
             os.remove(save_path)
+            
 
 # -----------------------
 # Debug exception handler
