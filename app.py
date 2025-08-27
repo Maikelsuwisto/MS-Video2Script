@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+print("Starting FastAPI backend...")
+
 # -----------------------
 # FastAPI app
 # -----------------------
