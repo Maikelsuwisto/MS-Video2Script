@@ -128,3 +128,7 @@ async def debug_exception_handler(request: Request, exc: Exception):
             "traceback": traceback.format_exc()
         },
     )
+
+if __name__ == "__main__":
+    port = int(os.environ["PORT"])
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
