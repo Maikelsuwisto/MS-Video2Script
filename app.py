@@ -12,6 +12,7 @@ import uvicorn
 # Debug print
 # -----------------------
 print("Starting FastAPI backend...")
+print("PORT from environment:", os.environ.get("PORT"))
 
 app = FastAPI(title="MS-Video2Script Backend")
 
@@ -139,5 +140,8 @@ def health():
 # Run with dynamic port for Railway
 # -----------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))  # Railway sets PORT
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))  # use Railway's dynamic port
+    print("Starting Uvicorn on port:", port)
     uvicorn.run("app:app", host="0.0.0.0", port=port)
+
