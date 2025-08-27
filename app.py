@@ -6,6 +6,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+import uvicorn
 
 # -----------------------
 # Debug print
@@ -133,3 +134,10 @@ async def debug_exception_handler(request: Request, exc: Exception):
 def health():
     print("Health check endpoint hit")  # debug
     return {"message": "MS-Video2Script API is running ✅"}
+
+# -----------------------
+# Run with dynamic port for Railway
+# -----------------------
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))  # Railway sets PORT
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
