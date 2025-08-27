@@ -31,7 +31,6 @@ assets_path = os.path.join(build_path, "assets")
 if not os.path.exists(build_path):
     raise RuntimeError(f"React build folder not found at '{build_path}'")
 
-app.mount("/", StaticFiles(directory=build_path, html=True), name="frontend")
 app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
 
 # -----------------------
@@ -131,3 +130,7 @@ async def debug_exception_handler(request: Request, exc: Exception):
 @app.get("/health")
 def health():
     return {"message": "MS-Video2Script API is running ✅"}
+
+@app.get("/")
+def root():
+    return {"message": "MS-Video2Script Frontend is mounted ✅"}
