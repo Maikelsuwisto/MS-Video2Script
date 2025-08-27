@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+from fastapi.responses import JSONResponse, FileResponse  # <-- add FileResponse here
+
 
 print("Starting FastAPI backend...")
 
