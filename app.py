@@ -9,11 +9,8 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 # -----------------------
-# Debug print
+# FastAPI app
 # -----------------------
-print("Starting FastAPI backend...")
-print("PORT from environment:", os.environ.get("PORT"))
-
 app = FastAPI(title="MS-Video2Script Backend")
 
 # Enable CORS
@@ -25,20 +22,25 @@ app.add_middleware(
 )
 
 # -----------------------
-# Serve React frontend (single-folder setup)
+# Serve React SPA at root
 # -----------------------
 build_path = "build"  # React build folder in same folder as app.py
-
 if not os.path.exists(build_path):
     raise RuntimeError(f"React build folder not found at '{build_path}'")
 
-# Serve React SPA at /app
-app.mount("/app", StaticFiles(directory=build_path, html=True), name="frontend")
+# Mount static files
+app.mount("/", StaticFiles(directory=build_path, html=True), name="frontend")
 
-# Root endpoint for Railway health check
+# -----------------------
+# Health checks
+# -----------------------
+@app.get("/health")
+def health():
+    return {"message": "MS-Video2Script API is running ✅"}
+
 @app.get("/")
 def root():
-    return {"message": "MS-Video2Script backend is running ✅"}
+    return {"message": "Backend running ✅"}
 
 # -----------------------
 # Upload folder
@@ -54,18 +56,18 @@ model = None  # will load on first transcription
 def get_model():
     global model
     if model is None:
-        print("Loading Whisper tiny model...")  # debug
+        print("Loading Whisper tiny model...")
         from faster_whisper import WhisperModel
         try:
             model = WhisperModel("tiny", device="cpu", compute_type="int8")
-            print("Model loaded successfully.")  # debug
+            print("Model loaded successfully.")
         except Exception as e:
             print("Error loading Whisper model:", e)
             raise e
     return model
 
 # -----------------------
-# Helper: Convert seconds to HH:MM:SS
+# Helper: seconds -> HH:MM:SS
 # -----------------------
 def seconds_to_hms(seconds: float) -> str:
     hours = int(seconds // 3600)
@@ -89,7 +91,6 @@ async def transcribe(
         with open(save_path, "wb") as f:
             shutil.copyfileobj(video.file, f)
 
-        # Load model lazily
         whisper_model = get_model()
 
         # Run transcription
@@ -115,7 +116,7 @@ async def transcribe(
             os.remove(save_path)
 
 # -----------------------
-# Debug Exception Handler
+# Debug exception handler
 # -----------------------
 @app.exception_handler(Exception)
 async def debug_exception_handler(request: Request, exc: Exception):
@@ -129,21 +130,9 @@ async def debug_exception_handler(request: Request, exc: Exception):
     )
 
 # -----------------------
-# Health check
-# -----------------------
-@app.get("/")
-def root():
-    return {"message": "MS-Video2Script backend is running ✅"}
-
-@app.get("/health")
-def health():
-    return {"message": "Health OK"}
-   
-
-# -----------------------
-# Run with dynamic port for Railway
+# Run with Railway's PORT
 # -----------------------
 if __name__ == "__main__":
-    port = int(os.environ["PORT"])  # Railway must provide this
+    port = int(os.environ["PORT"])
     print(f"Starting Uvicorn on Railway port {port}")
     uvicorn.run("app:app", host="0.0.0.0", port=port)
