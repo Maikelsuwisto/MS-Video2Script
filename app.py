@@ -23,15 +23,20 @@ app.add_middleware(
 )
 
 # -----------------------
-# Serve React frontend
+# Serve React frontend (single-folder setup)
 # -----------------------
 build_path = "build"  # React build folder in same folder as app.py
-assets_path = os.path.join(build_path, "assets")
 
 if not os.path.exists(build_path):
     raise RuntimeError(f"React build folder not found at '{build_path}'")
 
-app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+# Serve React SPA at /app
+app.mount("/app", StaticFiles(directory=build_path, html=True), name="frontend")
+
+# Root endpoint for Railway health check
+@app.get("/")
+def root():
+    return {"message": "MS-Video2Script backend is running ✅"}
 
 # -----------------------
 # Upload folder
@@ -96,10 +101,7 @@ async def transcribe(
                 entry["end"] = seconds_to_hms(seg.end)
             transcription.append(entry)
 
-        # Optional: generate audio URL
-        audio_url = None
-
-        return {"transcription": transcription, "audio_url": audio_url}
+        return {"transcription": transcription}
 
     except Exception as e:
         print("Error during transcription:", e)
@@ -129,8 +131,5 @@ async def debug_exception_handler(request: Request, exc: Exception):
 # -----------------------
 @app.get("/health")
 def health():
+    print("Health check endpoint hit")  # debug
     return {"message": "MS-Video2Script API is running ✅"}
-
-@app.get("/")
-def root():
-    return {"message": "MS-Video2Script Frontend is mounted ✅"}
