@@ -6,6 +6,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+import uvicorn
 
 print("Starting FastAPI backend...")
 
@@ -131,4 +132,6 @@ async def debug_exception_handler(request: Request, exc: Exception):
 
 if __name__ == "__main__":
     port = int(os.environ["PORT"])
+    print(f"Starting Uvicorn on Railway port {port}")
     uvicorn.run("app:app", host="0.0.0.0", port=port)
+
