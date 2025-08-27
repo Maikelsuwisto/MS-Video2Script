@@ -131,21 +131,19 @@ async def debug_exception_handler(request: Request, exc: Exception):
 # -----------------------
 # Health check
 # -----------------------
+@app.get("/")
+def root():
+    return {"message": "MS-Video2Script backend is running ✅"}
+
 @app.get("/health")
 def health():
-    print("Health check endpoint hit")  # debug
-    return {"message": "MS-Video2Script API is running ✅"}
+    return {"message": "Health OK"}
+   
 
 # -----------------------
 # Run with dynamic port for Railway
 # -----------------------
 if __name__ == "__main__":
-    import uvicorn
-    import os
-
-    # Railway sets the PORT environment variable
-    port = int(os.environ["PORT"])  # do not fallback
+    port = int(os.environ["PORT"])  # Railway must provide this
     print(f"Starting Uvicorn on Railway port {port}")
-
     uvicorn.run("app:app", host="0.0.0.0", port=port)
-
