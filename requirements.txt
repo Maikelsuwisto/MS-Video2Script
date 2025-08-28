@@ -4,7 +4,7 @@ python-multipart
 faster-whisper
 pydub
 ffmpeg-python
-torch
-torchaudio
-numpy
-soundfile
+torch==2.1.0+cpu
+torchaudio==2.1.0+cpu
+numpy==1.26.5
+soundfile==0.12.1
