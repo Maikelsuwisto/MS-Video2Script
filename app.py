@@ -1,12 +1,16 @@
-import os, re
+import os
+import re
 import uuid
 import shutil
 import traceback
+import subprocess
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+from pydub import AudioSegment
+import webrtcvad
 
 print("Starting FastAPI backend...")
 
@@ -88,143 +92,138 @@ def seconds_to_hms(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 # -----------------------
-# First speech detection
+# WebRTC VAD functions
 # -----------------------
-def detect_first_speech(audio_path, min_speech_duration=1.0, threshold=0.6, lead_in_skip=0.25,
-                        rms_window=0.05, rms_threshold=0.02):
-    import torch
-    import torchaudio
-    import soundfile as sf
-    import numpy as np
+ffmpeg_path = "ffmpeg"  # ensure ffmpeg is in PATH or provide full path
 
-    model, utils = torch.hub.load('snakers4/silero-vad', 'silero_vad', force_reload=False)
-    get_speech_timestamps, _, _, _, _ = utils
+def extract_audio_ffmpeg(video_path, audio_path="audio.wav", progress_callback=None):
+    if progress_callback:
+        progress_callback(0.1, "🔊 Extracting audio...")
+    cmd = [ffmpeg_path, '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', audio_path]
+    process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if process.returncode != 0:
+        raise RuntimeError(f"ffmpeg error: {process.stderr.decode()}")
+    if progress_callback:
+        progress_callback(0.25, "✅ Audio extracted.")
+    return audio_path
 
-    wav, sr = sf.read(audio_path)
-    if wav.ndim > 1:
-        wav = np.mean(wav, axis=1)
+def detect_first_speech_offset_webrtcvad(audio_path, aggressiveness=3, min_speech_ms=1000, ignore_before_ms=1000):
+    audio = AudioSegment.from_wav(audio_path)
+    audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+    raw_audio = audio.raw_data
+    vad = webrtcvad.Vad(aggressiveness)
+    frame_duration = 30  # ms
+    frame_size = int(16000 * frame_duration / 1000) * 2
+    frames = [raw_audio[i:i+frame_size] for i in range(0, len(raw_audio), frame_size)]
 
-    wav_tensor = torch.from_numpy(wav).float()
-    if sr != 16000:
-        wav_tensor = torchaudio.transforms.Resample(orig_freq=sr, new_freq=16000)(wav_tensor)
-        sr = 16000
+    speech_start_frame = None
+    speech_frames_count = 0
+    required_speech_frames = min_speech_ms // frame_duration
+    ignore_before_frames = ignore_before_ms // frame_duration
 
-    speech_timestamps = get_speech_timestamps(wav_tensor, model, sampling_rate=sr, threshold=threshold)
+    for i, frame in enumerate(frames):
+        if len(frame) < frame_size:
+            break
+        if vad.is_speech(frame, sample_rate=16000):
+            if speech_start_frame is None:
+                speech_start_frame = i
+            speech_frames_count += 1
+        else:
+            if speech_start_frame is not None and speech_frames_count >= required_speech_frames:
+                if speech_start_frame >= ignore_before_frames:
+                    return (speech_start_frame * frame_duration) / 1000.0
+            speech_start_frame = None
+            speech_frames_count = 0
 
-    for seg in speech_timestamps:
-        dur = (seg['end'] - seg['start']) / sr
-        if dur >= min_speech_duration:
-            start_idx = seg['start'] + int(lead_in_skip * sr)
-            end_idx = seg['end']
-            window_size = int(rms_window * sr)
+    if speech_start_frame is not None and speech_frames_count >= required_speech_frames:
+        if speech_start_frame >= ignore_before_frames:
+            return (speech_start_frame * frame_duration) / 1000.0
 
-            for i in range(start_idx, end_idx - window_size, window_size):
-                window = wav_tensor[i:i + window_size]
-                rms = torch.sqrt(torch.mean(window ** 2)).item()
-                if rms >= rms_threshold:
-                    return i / sr
-            return seg['start'] / sr
     return 0.0
+
+def detect_first_speech(video_path):
+    try:
+        audio_path = extract_audio_ffmpeg(video_path)
+        offset_sec = detect_first_speech_offset_webrtcvad(audio_path)
+        return offset_sec
+    finally:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
 
 # -----------------------
 # Helper: smooth splitting
 # -----------------------
+def split_segment_text_precise(text: str, start: float, end: float):
+    words = text.strip().split()
+    if not words:
+        return []
 
-def split_segment_text_smooth(seg, max_chars=40, min_chars=30, min_duration=1.0, first_block_extra=0.5):
-    """
-    Split segment into readable lines:
-    - Lines ≤ max_chars
-    - Lines ≥ min_chars (merge small fragments with previous)
-    - Split at punctuation, commas, 'and', or force split
-    - Assign proportional timestamps
-    """
-    # 1. Split into sentences by punctuation
-    sentences = re.split(r'(?<=[.!?]) +', seg["text"])
-    sentences = [s.strip() for s in sentences if s.strip()]
+    total_duration = end - start
+    per_word = total_duration / len(words)
 
-    # 2. Split long sentences at commas or 'and' or force split
-    split_sentences = []
-    for s in sentences:
-        if len(s) <= max_chars:
-            split_sentences.append(s)
-        else:
-            parts = re.split(r', | and ', s)
-            current_line = ""
-            for part in parts:
-                part = part.strip()
-                if not part:
-                    continue
-                if len(current_line) + len(part) + 1 <= max_chars:
-                    current_line += (" " if current_line else "") + part
-                else:
-                    if len(current_line) >= min_chars:
-                        split_sentences.append(current_line)
-                        current_line = part
-                    else:
-                        if split_sentences:
-                            split_sentences[-1] += " " + current_line
-                        else:
-                            current_line = part
-            if current_line:
-                # Force split if still too long
-                while len(current_line) > max_chars:
-                    chunk = current_line[:max_chars].rsplit(" ", 1)[0]
-                    if not chunk:
-                        chunk = current_line[:max_chars]
-                    split_sentences.append(chunk.strip())
-                    current_line = current_line[len(chunk):].strip()
-                if current_line:
-                    split_sentences.append(current_line)
+    timed_words = []
+    for i, word in enumerate(words):
+        w_start = start + i * per_word
+        w_end = w_start + per_word
+        timed_words.append((word, w_start, w_end))
 
-    # 3. Merge tiny lines (< min_chars) with previous line
-    merged_sentences = []
-    for line in split_sentences:
-        if merged_sentences and len(line) < min_chars:
-            merged_sentences[-1] += " " + line
-        else:
-            merged_sentences.append(line)
+    sentences = []
+    current_words = []
+    s_start, s_end = None, None
 
-    # 4. Assign timestamps proportionally with min_duration
-    total_duration = seg["end"] - seg["start"]
-    total_chars = sum(len(s) for s in merged_sentences)
-    block_entries = []
-    current_start = seg["start"]
+    for word, w_start, w_end in timed_words:
+        if not current_words:
+            s_start = w_start
+        current_words.append(word)
+        s_end = w_end
 
-    for idx, block in enumerate(merged_sentences):
-        block_duration = total_duration * (len(block) / total_chars) if total_chars > 0 else total_duration / len(merged_sentences)
-        block_duration = max(block_duration, min_duration)
-        if idx == 0:
-            block_duration += first_block_extra
-        block_end = current_start + block_duration
-        block_end = max(block_end, current_start + min_duration)
-        block_entries.append((current_start, block_end, block))
-        current_start = block_end
+        if re.search(r'[.?!]$', word):  # punctuation = sentence boundary
+            sentences.append({
+                "text": " ".join(current_words),
+                "start": s_start,
+                "end": s_end
+            })
+            current_words = []
 
-    return block_entries
+    if current_words:  # leftover
+        sentences.append({
+            "text": " ".join(current_words),
+            "start": s_start,
+            "end": s_end
+        })
+
+    return sentences
+
 
 # -----------------------
 # Transcription endpoint
 # -----------------------
+# -----------------------
+# Transcription endpoint (with optional split)
+# -----------------------
+# -----------------------
+# Transcription endpoint (with optional split + first speech alignment)
+# -----------------------
 @app.post("/transcribe")
-async def transcribe(
+async def transcribe_whisper_only(
     video: UploadFile = File(...),
-    with_timestamps: str = Form("0")
+    with_timestamps: str = Form("0"),
+    split_segments: str = Form("0")
 ):
     unique_filename = f"{uuid.uuid4()}_{video.filename}"
     save_path = os.path.join(UPLOAD_DIR, unique_filename)
 
     try:
-        # Save uploaded video temporarily
+        # Save uploaded video
         with open(save_path, "wb") as f:
             shutil.copyfileobj(video.file, f)
 
         whisper_model = get_model()
 
-        # 🔹 Detect when real speech starts (in seconds)
+        # 🔹 Detect actual first speech time
         first_speech_time = detect_first_speech(save_path)
-        print(f"First speech detected at {first_speech_time:.2f}s")
 
-        # Run transcription (starting from detected speech)
+        # Run transcription
         segments, info = whisper_model.transcribe(
             save_path,
             beam_size=5,
@@ -233,25 +232,43 @@ async def transcribe(
         )
 
         transcription = []
-        for idx, seg in enumerate(segments):
-            # Skip segments that end before speech starts
-            if seg.end <= first_speech_time:
-                continue
 
-            # Shift the very first segment so it doesn't start at 0
-            if idx == 0 and seg.start < first_speech_time:
-                seg_start = first_speech_time
+        first_adjusted = False  # only adjust the first sentence once
+
+        for seg in segments:
+            if split_segments == "1":
+                # 🔹 Split long segment into smaller sentences
+                subs = split_segment_text_precise(seg.text, seg.start, seg.end)
+                for i, sub in enumerate(subs):
+                    entry = {"text": sub["text"]}
+
+                    s_start, s_end = sub["start"], sub["end"]
+
+                    # Adjust first sentence start to detected speech offset
+                    if not first_adjusted and first_speech_time > 0:
+                        s_start = first_speech_time
+                        first_adjusted = True
+
+                    if with_timestamps == "1":
+                        entry["start"] = seconds_to_hms(s_start)
+                        entry["end"] = seconds_to_hms(s_end)
+
+                    transcription.append(entry)
             else:
-                seg_start = seg.start
+                # 🔹 Default: use Whisper segments directly
+                entry = {"text": seg.text}
 
-            seg_dict = {"start": seg_start, "end": seg.end, "text": seg.text}
-            split_blocks = split_segment_text_smooth(seg_dict)
+                s_start, s_end = seg.start, seg.end
 
-            for block_start, block_end, block_text in split_blocks:
-                entry = {"text": block_text}
+                # Adjust only the very first segment
+                if not first_adjusted and first_speech_time > 0:
+                    s_start = first_speech_time
+                    first_adjusted = True
+
                 if with_timestamps == "1":
-                    entry["start"] = seconds_to_hms(block_start)
-                    entry["end"] = seconds_to_hms(block_end)
+                    entry["start"] = seconds_to_hms(s_start)
+                    entry["end"] = seconds_to_hms(s_end)
+
                 transcription.append(entry)
 
         return {"transcription": transcription}
@@ -281,6 +298,6 @@ async def debug_exception_handler(request: Request, exc: Exception):
     )
 
 if __name__ == "__main__":
-    port = int(os.environ["PORT"])
-    print(f"Starting Uvicorn on Railway port {port}")
+    port = int(os.environ.get("PORT", 8000))
+    print(f"Starting Uvicorn on port {port}")
     uvicorn.run("app:app", host="0.0.0.0", port=port)
