@@ -4,3 +4,7 @@ python-multipart
 faster-whisper
 pydub
 ffmpeg-python
+torch
+torchaudio
+numpy
+soundfile
