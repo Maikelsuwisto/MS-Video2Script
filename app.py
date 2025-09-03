@@ -153,54 +153,39 @@ def detect_first_speech(video_path):
 # -----------------------
 # Helper: smooth splitting
 # -----------------------
-def split_segment_text_precise(text: str, start: float, end: float):
-    words = text.strip().split()
-    if not words:
-        return []
+def split_segment_text_precise(text, start_time, end_time):
+    """
+    Split a Whisper segment text into sentences with proportional timestamps.
+    """
+    # Regex to split while keeping delimiters
+    sentences = re.split(r'([.!?])', text)
 
-    total_duration = end - start
-    per_word = total_duration / len(words)
+    # Recombine delimiters with sentence parts
+    sentences = [
+        (sentences[i] + (sentences[i+1] if i+1 < len(sentences) else ""))
+        for i in range(0, len(sentences), 2)
+    ]
 
-    timed_words = []
-    for i, word in enumerate(words):
-        w_start = start + i * per_word
-        w_end = w_start + per_word
-        timed_words.append((word, w_start, w_end))
+    # Clean up and remove empties
+    sentences = [s.strip() for s in sentences if s.strip()]
 
-    sentences = []
-    current_words = []
-    s_start, s_end = None, None
+    # Allocate time proportionally
+    total_chars = sum(len(s) for s in sentences)
+    results = []
+    current_time = start_time
 
-    for word, w_start, w_end in timed_words:
-        if not current_words:
-            s_start = w_start
-        current_words.append(word)
-        s_end = w_end
-
-        if re.search(r'[.?!]$', word):  # punctuation = sentence boundary
-            sentences.append({
-                "text": " ".join(current_words),
-                "start": s_start,
-                "end": s_end
-            })
-            current_words = []
-
-    if current_words:  # leftover
-        sentences.append({
-            "text": " ".join(current_words),
-            "start": s_start,
-            "end": s_end
+    for s in sentences:
+        proportion = len(s) / total_chars if total_chars > 0 else 0
+        duration = proportion * (end_time - start_time)
+        results.append({
+            "text": s,
+            "start": current_time,
+            "end": current_time + duration
         })
+        current_time += duration
 
-    return sentences
+    return results
 
-
-# -----------------------
-# Transcription endpoint
-# -----------------------
-# -----------------------
-# Transcription endpoint (with optional split)
-# -----------------------
 # -----------------------
 # Transcription endpoint (with optional split + first speech alignment)
 # -----------------------
@@ -240,7 +225,7 @@ async def transcribe_whisper_only(
                 # 🔹 Split long segment into smaller sentences
                 subs = split_segment_text_precise(seg.text, seg.start, seg.end)
                 for i, sub in enumerate(subs):
-                    entry = {"text": sub["text"]}
+                    entry = {"text": sub["text"].strip()}  # ✅ strip whitespace
 
                     s_start, s_end = sub["start"], sub["end"]
 
@@ -256,7 +241,7 @@ async def transcribe_whisper_only(
                     transcription.append(entry)
             else:
                 # 🔹 Default: use Whisper segments directly
-                entry = {"text": seg.text}
+                entry = {"text": seg.text.strip()}  # ✅ strip whitespace
 
                 s_start, s_end = seg.start, seg.end
 
@@ -281,7 +266,6 @@ async def transcribe_whisper_only(
     finally:
         if os.path.exists(save_path):
             os.remove(save_path)
-
 
 # -----------------------
 # Debug exception handler
